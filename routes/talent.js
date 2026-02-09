@@ -269,7 +269,7 @@ ${resumeText}
 
   try {
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -293,6 +293,7 @@ ${resumeText}
     const text =
       data.candidates[0]?.content?.parts?.[0]?.text || "";
 
+  console.log("Gemini raw response:", text); 
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error("JSON not found in Gemini response");
@@ -312,6 +313,7 @@ ${resumeText}
     return null;
   }
 }
+
 
 //s score nikal rahe hain
 router.post('/student/resume', requireRole('candidate'), async (req, res) => {
@@ -466,45 +468,7 @@ router.post('/student/interview', requireRole('candidate'), async (req, res) => 
     }
 
     let questions = [];
-    if (GROQ_API_KEY) {
-      const groq = new Groq({ apiKey: GROQ_API_KEY });
-      const prompt = `Generate 5 interview questions for a candidate applying to:
-      Role: ${company.role}
-      Company: ${company.name}
-      Description: ${company.description}
-      Include a mix of:
-      - 2 Technical questions specific to the role
-      - 2 Behavioral/HR questions
-      - 1 Problem-solving/Situational question
-      Return a JSON array where each object has:
-      {
-        "type": "Technical" | "Behavioral" | "Situational",
-        "question": "The question text",
-        "hint": "A short hint or key topics to mention in the answer"
-      }
-      Return ONLY the JSON.`;
-
-      const completion = await groq.chat.completions.create({
-        messages: [{ role: "user", content: prompt }],
-        model: "llama-3.3-70b-versatile",
-        temperature: 0.7,
-        response_format: { type: "json_object" },
-      });
-
-      const content = completion.choices[0]?.message?.content;
-      if (content) {
-        try {
-          const parsed = JSON.parse(content);
-          if (Array.isArray(parsed)) {
-            questions = parsed;
-          } else if (parsed.questions && Array.isArray(parsed.questions)) {
-            questions = parsed.questions;
-          }
-        } catch (e) {
-          console.error("Parse fail ho gaya:", e);
-        }
-      }
-    }
+    
 
     if (questions.length === 0) {
       questions = [
