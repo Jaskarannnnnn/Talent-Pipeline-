@@ -1,11 +1,13 @@
 const express = require('express');
+const fetch = require("node-fetch");
+
 const jwt = require('jsonwebtoken');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const mammoth = require('mammoth');
 
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 
 const nodemailer = require('nodemailer');
 
@@ -242,14 +244,15 @@ router.get('/student/resume', requireRole('candidate'), async (req, res) => {
 
 // groq api se ats score nikal rahe hain
 async function getGeminiAtsScore(resumeText, jobText) {
-  if (!GEMINI_API_KEY) return null;
+  if (!process.env.GEMINI_API_KEY) {
+    console.error("Gemini key missing");
+    return null;
+  }
 
   const prompt = `
 You are an expert ATS analyzer.
 
-Analyze this resume against the job description.
-
-Return JSON only:
+Return ONLY valid JSON:
 
 {
   "score": number (0-100),
@@ -265,18 +268,38 @@ ${resumeText}
 `;
 
   try {
-    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: prompt }]
+            }
+          ]
+        })
+      }
+    );
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    const data = await response.json();
 
-    const jsonStart = text.indexOf("{");
-    const jsonEnd = text.lastIndexOf("}");
+    if (!data.candidates) {
+      console.error("Gemini empty response:", data);
+      return null;
+    }
 
-    if (jsonStart === -1) return null;
+    const text =
+      data.candidates[0]?.content?.parts?.[0]?.text || "";
 
-    const parsed = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("JSON not found in Gemini response");
+      return null;
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
 
     return {
       score: parsed.score || 0,
@@ -290,9 +313,7 @@ ${resumeText}
   }
 }
 
-
-
-// resume save kar rahe hain aur ats score nikal rahe hain
+//s score nikal rahe hain
 router.post('/student/resume', requireRole('candidate'), async (req, res) => {
   try {
     const { headline, skills = '', education = '', projects = '', experience = '', links = '', atsCompanyId } = req.body;
