@@ -250,57 +250,49 @@ async function getGeminiAtsScore(resumeText, jobText) {
   }
 
   const prompt = `
-You are an expert ATS analyzer.
+    You are an expert ATS analyzer.
+    Compare the Resume against the Job Description.
+    Return a JSON object with:
+    1. "score": a number from 0-100.
+    2. "explanation": a 2-sentence summary.
+    3. "missing_keywords": an array of technical skills or keywords missing from the resume.
 
-Return ONLY valid JSON:
-
-{
-  "score": number (0-100),
-  "explanation": "short explanation",
-  "missing_keywords": ["keywords"]
-}
-
-Job Description:
-${jobText}
-
-Resume:
-${resumeText}
-`;
+    Job Description: ${jobText}
+    Resume: ${resumeText}
+  `;
 
   try {
+    // Changed endpoint to v1beta for better compatibility with 1.5-flash
     const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: prompt }]
-            }
-          ]
+          contents: [{ parts: [{ text: prompt }] }],
+          // This ensures Gemini only returns the JSON object without markdown text
+          generationConfig: {
+            response_mime_type: "application/json"
+          }
         })
       }
     );
 
     const data = await response.json();
 
-    if (!data.candidates) {
+    if (data.error) {
+      console.error("API Error Details:", data.error);
+      return null;
+    }
+
+    if (!data.candidates || data.candidates.length === 0) {
       console.error("Gemini empty response:", data);
       return null;
     }
 
-    const text =
-      data.candidates[0]?.content?.parts?.[0]?.text || "";
-
-  console.log("Gemini raw response:", text); 
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("JSON not found in Gemini response");
-      return null;
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
+    // Parse the JSON string directly from the response
+    const resultText = data.candidates[0].content.parts[0].text;
+    const parsed = JSON.parse(resultText);
 
     return {
       score: parsed.score || 0,
@@ -313,7 +305,6 @@ ${resumeText}
     return null;
   }
 }
-
 
 //s score nikal rahe hain
 router.post('/student/resume', requireRole('candidate'), async (req, res) => {
