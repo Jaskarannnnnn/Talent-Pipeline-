@@ -4,8 +4,9 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 const mammoth = require('mammoth');
-const fetch = require('node-fetch');
-const Groq = require('groq-sdk');
+
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 const nodemailer = require('nodemailer');
 
 const Company = require('../models/Company');
@@ -17,7 +18,8 @@ const User = require('../models/User');
 const router = express.Router();
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_jwt_secret_change_me';
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
+
 
 // resumes save karne ke liye folder bana rahe hain
 const uploadDir = path.join(__dirname, '..', 'uploads', 'resumes');
@@ -239,60 +241,56 @@ router.get('/student/resume', requireRole('candidate'), async (req, res) => {
 });
 
 // groq api se ats score nikal rahe hain
-async function getGroqAtsScore(resumeText, jobText) {
-  if (!GROQ_API_KEY) return null;
+async function getGeminiAtsScore(resumeText, jobText) {
+  if (!GEMINI_API_KEY) return null;
 
-  const prompt = `You are an expert ATS (Applicant Tracking System) analyzer. Analyze this resume against the job description.
+  const prompt = `
+You are an expert ATS analyzer.
+
+Analyze this resume against the job description.
+
+Return JSON only:
+
+{
+  "score": number (0-100),
+  "explanation": "short explanation",
+  "missing_keywords": ["keywords"]
+}
+
 Job Description:
 ${jobText}
+
 Resume:
 ${resumeText}
-Provide your analysis as a JSON object with the following structure:
-{
-  "score": <number between 0-100>,
-  "explanation": "<2-3 sentences explaining the match quality and key strengths/weaknesses>",
-  "missing_keywords": ["<list of important missing skills/keywords from job description>"]
-}
-Return ONLY the JSON object, avoid any markdown formatting or surrounding text.`;
+`;
 
   try {
-    const groq = new Groq({ apiKey: GROQ_API_KEY });
-    const completion = await groq.chat.completions.create({
-      messages: [{ role: "user", content: prompt }],
-      model: "llama-3.3-70b-versatile",
-      temperature: 0.1,
-      response_format: { type: "json_object" },
-    });
+    const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    const content = completion.choices[0]?.message?.content;
-    if (!content) return null;
+    const result = await model.generateContent(prompt);
+    const text = result.response.text();
 
-    let result;
-    try {
-      result = JSON.parse(content);
-    } catch (parseError) {
-      const jsonStart = content.indexOf('{');
-      const jsonEnd = content.lastIndexOf('}');
-      if (jsonStart !== -1 && jsonEnd !== -1) {
-        result = JSON.parse(content.substring(jsonStart, jsonEnd + 1));
-      } else {
-        return null;
-      }
-    }
+    const jsonStart = text.indexOf("{");
+    const jsonEnd = text.lastIndexOf("}");
 
-    if (!result || typeof result.score !== 'number') return null;
+    if (jsonStart === -1) return null;
+
+    const parsed = JSON.parse(text.substring(jsonStart, jsonEnd + 1));
 
     return {
-      score: Math.max(0, Math.min(100, Math.round(result.score))),
-      explanation: result.explanation || "No explanation provided.",
-      missingKeywords: Array.isArray(result.missing_keywords) ? result.missing_keywords.slice(0, 10) : []
+      score: parsed.score || 0,
+      explanation: parsed.explanation || "",
+      missingKeywords: parsed.missing_keywords || []
     };
 
-  } catch (error) {
-    console.error('Groq ATS API fail ho gaya:', error);
+  } catch (err) {
+    console.error("Gemini ATS fail:", err);
     return null;
   }
 }
+
+
 
 // resume save kar rahe hain aur ats score nikal rahe hain
 router.post('/student/resume', requireRole('candidate'), async (req, res) => {
@@ -318,7 +316,8 @@ router.post('/student/resume', requireRole('candidate'), async (req, res) => {
         const jobText = `${company.role} ${company.description} ${company.eligibilityCriteria}`;
 
         // groq api call kar rahe hain
-        const atsResult = await getGroqAtsScore(resumeText, jobText);
+        const atsResult = await getGeminiAtsScore(resumeText, jobText);
+
         if (atsResult && atsResult.score != null) {
           atsScore = atsResult.score;
           atsMissingKeywords = atsResult.missingKeywords || [];
@@ -389,7 +388,8 @@ router.post('/student/resume/upload', requireRole('candidate'), upload.single('r
         const resumeText = extractedText || '';
         const jobText = `${company.role} ${company.description} ${company.eligibilityCriteria}`;
 
-        const atsResult = await getGroqAtsScore(resumeText, jobText);
+        const atsResult = await getGeminiAtsScore(resumeText, jobText);
+
         if (atsResult && atsResult.score != null) {
           atsScore = atsResult.score;
           atsMissingKeywords = atsResult.missingKeywords || [];
