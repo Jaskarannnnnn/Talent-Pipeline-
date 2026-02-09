@@ -27,7 +27,7 @@ if (geminiArg) {
 
 const app = express();
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/gg';
+const MONGODB_URI = process.env.MONGODB_URI;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_secret_change_me';
 const PORT = process.env.PORT || 3000;
 
